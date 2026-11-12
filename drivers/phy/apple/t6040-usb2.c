@@ -293,6 +293,7 @@ struct t6040_usb2_phy {
 	bool usb3_lent;		/* DP mode took the lanes of this Type-C port */
 	bool pipe_switched;	/* the controller's PIPE runs on this PHY */
 	bool cio_up;		/* the lanes run USB4/Thunderbolt */
+	bool tunnel_clk_on;	/* trial: DP clock switches started for a DP tunnel */
 
 	/* DisplayPort; dp_ok is false when the DT lacks a DP route */
 	struct phy *dp;
@@ -1780,6 +1781,7 @@ static void t6040_cio_down_locked(struct t6040_usb2_phy *tphy)
 	t6040_usb3_firmware_power_down(tphy);
 	t6040_usb3_sleep(tphy);
 	tphy->cio_up = false;
+	tphy->tunnel_clk_on = false;
 	pm_runtime_put(tphy->dev);
 	dev_info(tphy->dev, "CIO PHY asleep\n");
 	t6040_usb3_reclaim_locked(tphy);
@@ -1948,6 +1950,44 @@ static const struct phy_ops t6040_dp_phy_ops = {
 	.validate = t6040_dp_validate,
 	.set_mode = t6040_dp_set_mode,
 };
+
+/*
+ * Trial: the DisplayPort-over-Thunderbolt pixel clock. Runs the DP clock
+ * switch sequence of DP alt mode (t6040_dp_configure_clks()) while the lanes
+ * are in USB4/Thunderbolt mode, and logs what the switches acknowledge. The
+ * clock rate source in this mode is not known yet; nothing else is written.
+ * A stop leaves the switches as they are: they go with the CIO PHY.
+ */
+int apple_t6040_dp_tunnel_clock(struct phy *phy, unsigned int dpin, u8 rate)
+{
+	struct t6040_usb2_phy *tphy;
+	void __iomem *cfg;
+	int ret;
+
+	if (!phy || phy->ops != &t6040_dp_phy_ops)
+		return -EOPNOTSUPP;
+	if (dpin > 1)
+		return -EINVAL;
+	tphy = phy_get_drvdata(phy);
+	guard(mutex)(&tphy->lock);
+	cfg = t6040_cfg(tphy);
+	dev_info(tphy->dev, "tunnel clock dpin%u rate 0x%x: cio %d on %d, ctrl %#x status %#x\n",
+		 dpin, rate, tphy->cio_up, tphy->tunnel_clk_on,
+		 readl(cfg + T6040_CFG_DP_CLKSWITCH_CTRL),
+		 readl(cfg + T6040_CFG_DP_CLKSWITCH_STAT));
+	if (!rate || tphy->tunnel_clk_on)
+		return 0;
+	if (!tphy->cio_up)
+		return -ENOLINK;
+	ret = t6040_dp_configure_clks(tphy);
+	dev_info(tphy->dev, "tunnel clock switches: %d, ctrl %#x status %#x\n", ret,
+		 readl(cfg + T6040_CFG_DP_CLKSWITCH_CTRL),
+		 readl(cfg + T6040_CFG_DP_CLKSWITCH_STAT));
+	if (!ret)
+		tphy->tunnel_clk_on = true;
+	return ret;
+}
+EXPORT_SYMBOL_GPL(apple_t6040_dp_tunnel_clock);
 
 /* ---- Type-C mode switch: the Type-C controller asks for DP on a USB-C port ---- */
 
