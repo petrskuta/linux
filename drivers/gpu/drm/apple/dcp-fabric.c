@@ -38,6 +38,12 @@ module_param(tiled_split, bool, 0644);
 MODULE_PARM_DESC(tiled_split,
 		 "Drive both halves of a tiled Thunderbolt display (LG UltraFine 5K) on one pipeline, through its two DPTX ports (default: on)");
 
+/* Trial: what a T6040 tunnel pixel clock request does (no PHY support yet). */
+static int t6040_tunnel_clock;
+module_param(t6040_tunnel_clock, int, 0644);
+MODULE_PARM_DESC(t6040_tunnel_clock,
+		 "T6040 DP tunnel pixel clock (trial): 0 refuse it (default), 1 report it set without touching the PHY");
+
 static bool typec_follow_crtc = true;
 module_param(typec_follow_crtc, bool, 0444);
 
@@ -398,6 +404,24 @@ static int dcp_route_clock_rate(struct apple_dcp_typec_route *route,
 		if (!ret)
 			route->tunnel_rate = rate;
 		return ret;
+	}
+
+	/*
+	 * T6040/T6041: the Type-C PHY (phy-apple-t6040-usb2) exports no tunnel
+	 * clock, and the ATC fall-through below must never see its PHY.
+	 */
+	if (of_machine_is_compatible("apple,t6040") ||
+	    of_machine_is_compatible("apple,t6041")) {
+		int mode = READ_ONCE(t6040_tunnel_clock);
+
+		dev_warn(route->dcp->dev,
+			 "t6040 trial: tunnel pixel clock dpin%u source %u rate 0x%x: %s\n",
+			 dpin, route->mux_index, rate,
+			 mode == 1 ? "reported set, PHY untouched" : "refused");
+		if (mode != 1)
+			return rate ? -EOPNOTSUPP : 0;
+		route->tunnel_rate = rate;
+		return 0;
 	}
 
 	/* A T8132 dcpext names its source (2 or 4), as T6030 does. */
