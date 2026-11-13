@@ -2191,6 +2191,18 @@ static bool dcp_t602x_tunnel_route(struct apple_dcp_typec_route *route)
 					"apple,t6020-display-crossbar");
 }
 
+/* TRIAL: any tunnel on a T602X crossbar (T6040 on 26.6 included) */
+static bool dcp_t602x_xbar_tunnel(struct apple_dcp_typec_route *route)
+{
+	struct device_node *np;
+
+	if (!route || !route->tunnel || !route->active_xbar)
+		return false;
+	np = route->active_xbar->chip->dev.parent->of_node;
+	return of_device_is_compatible(np, "apple,t6020-display-crossbar") ||
+	       of_device_is_compatible(np, "apple,t6041-display-crossbar");
+}
+
 /*
  * Crossbar connection up/down, looked up at runtime so appledrm does not
  * require the crossbar driver to be built.
@@ -2478,7 +2490,7 @@ int dcp_tunnel_crossbar_down(struct apple_dcp *dcp, u32 unit)
 		return -ESTALE;
 	if (dcp_is_t8132_ext(dcp))
 		return dcp_t8132_crossbar_down_locked(dcp, route, "WillChangeLinkConfiguration");
-	if (!(t6040_retrain == 1 && dcp_t602x_tunnel_route(route)))
+	if (!(t6040_retrain == 1 && dcp_t602x_xbar_tunnel(route)))
 		dcp_tunnel_dpin_locked(dcp, false);
 	ret = dcp_dpxbar_link(route->active_xbar, false);
 	/*
@@ -2486,10 +2498,10 @@ int dcp_tunnel_crossbar_down(struct apple_dcp *dcp, u32 unit)
 	 * AUX path is there while DCP trains the new link configuration.
 	 */
 	if (dcp_xbar_t8142(route->active_xbar) ||
-	    (t6040_retrain == 2 && dcp_t602x_tunnel_route(route)))
+	    (t6040_retrain == 2 && dcp_t602x_xbar_tunnel(route)))
 		dcp_tunnel_dpin_locked(dcp, true);
-	dev_dbg(dcp->dev, "t6040 trial: retrain mode %d, crossbar link down %d\n",
-		t6040_retrain, ret);
+	dev_dbg(dcp->dev, "t6040 trial: retrain mode %d (t602x %d), crossbar link down %d\n",
+		t6040_retrain, dcp_t602x_xbar_tunnel(route), ret);
 	return ret;
 }
 
