@@ -489,6 +489,11 @@ struct apple_dpin_binding {
  * The blocks sit 0x390000 after the ACIO "rc" region: dpin1 0x8000 after
  * dpin0, and on routers with four, dpin2 and dpin3 0x18000 and 0x20000 after.
  */
+/* Trial: T6040/T6041 host router TMU left to the router firmware (QUIRK_HOST_TMU). */
+static bool t6040_host_tmu = true;
+module_param(t6040_host_tmu, bool, 0444);
+MODULE_PARM_DESC(t6040_host_tmu, "T6040/T6041: leave the host router's TMU to its firmware (trial, default on)");
+
 /* Trial: the DP IN policy of T6040/T6041, 4 = apple_dpin_m4, 5 = apple_dpin_m5. */
 static int t6040_dpin = 5;
 module_param(t6040_dpin, int, 0444);
@@ -2543,6 +2548,11 @@ static int apple_nhi_probe(struct platform_device *pdev)
 		anhi->nhi.quirks |= QUIRK_GEN4_LINK_RECOVERY;
 	if (acio->hw->host_tmu)
 		anhi->nhi.quirks |= QUIRK_HOST_TMU;
+	/* Trial: leave the T6040 host router's TMU to its firmware, as on T6050. */
+	if (t6040_host_tmu && acio->hw == &apple_cio_t6040_hw) {
+		anhi->nhi.quirks |= QUIRK_HOST_TMU;
+		dev_info(anhi->dev, "trial: T6040 host TMU left to the router firmware\n");
+	}
 
 	anhi->nhi.hop_count = readl(anhi->nhi_base + APPLE_CIO_NHI_HOP_COUNT) &
 			      APPLE_CIO_NHI_HOP_COUNT_MASK;
