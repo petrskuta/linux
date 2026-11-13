@@ -359,9 +359,35 @@ static bool tb_tmu_hifi_uni_required(struct tb *tb)
 				     tb_switch_tmu_hifi_uni_required) == 1;
 }
 
+/*
+ * Trial: macOS runs the host's TMU in mode 3 (bi-directional HiFi) with a
+ * Studio Display attached, whose DP OUT adapter reports "Min Required TMU
+ * Mode" 3. Use that mode on the host and enable it on each device router
+ * from scratch, posting the host's time, even when it reads as enabled.
+ */
+static bool apple_tmu_hifi = true;
+module_param(apple_tmu_hifi, bool, 0444);
+MODULE_PARM_DESC(apple_tmu_hifi,
+		 "trial: host and device routers in bi-directional HiFi TMU, always (re)enabled with the host's time (default: true)");
+
 static int tb_enable_tmu(struct tb_switch *sw)
 {
 	int ret;
+
+	if (apple_tmu_hifi && tb_route(sw)) {
+		ret = tb_switch_tmu_configure(sw, TB_SWITCH_TMU_MODE_HIFI_BI);
+		if (ret)
+			return ret;
+		ret = tb_switch_tmu_disable(sw);
+		if (ret)
+			return ret;
+		ret = tb_switch_tmu_post_time(sw);
+		if (ret)
+			return ret;
+		ret = tb_switch_tmu_enable(sw);
+		tb_sw_info(sw, "trial: TMU bi-directional HiFi enabled with the host's time: %d\n", ret);
+		return ret;
+	}
 
 	/* The host router's firmware runs its TMU on these hosts. */
 	if (!tb_route(sw) && tb_switch_tmu_host_managed(sw))
@@ -3984,7 +4010,8 @@ static int tb_start(struct tb *tb, bool reset)
 	 * Normal mode.
 	 */
 	if (!tb_switch_tmu_host_managed(tb->root_switch)) {
-		tb_switch_tmu_configure(tb->root_switch, TB_SWITCH_TMU_MODE_LOWRES);
+		tb_switch_tmu_configure(tb->root_switch, apple_tmu_hifi ?
+					TB_SWITCH_TMU_MODE_HIFI_BI : TB_SWITCH_TMU_MODE_LOWRES);
 		/* Enable TMU if it is off */
 		tb_switch_tmu_enable(tb->root_switch);
 	}

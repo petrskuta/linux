@@ -501,7 +501,7 @@ MODULE_PARM_DESC(t6040_host_tmu, "T6040/T6041: leave the host router's TMU to it
  * blocks "atc-dpin,t602x", and the t8103 handshake left +0x00 bit 1, +0x0c
  * bit 1 and MODE_A/MODE_B clear while a tunnel streamed to a dark display.
  */
-static int t6040_dpin = 6;
+static int t6040_dpin = 4;
 module_param(t6040_dpin, int, 0444);
 MODULE_PARM_DESC(t6040_dpin, "T6040/T6041 DP IN policy (trial): 4 = M4 (T8132), 5 = M5 (T6050), 6 = M4 with the T602X handshake");
 
