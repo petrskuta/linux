@@ -108,9 +108,9 @@ MODULE_PARM_DESC(bw_alloc_mode,
 		 "enable bandwidth allocation mode if supported (default: true)");
 
 static bool dp_video_counter;
-module_param(dp_video_counter, bool, 0444);
+module_param(dp_video_counter, bool, 0644);
 MODULE_PARM_DESC(dp_video_counter,
-		 "diagnostic: count packets on the DP video path's DP IN hop and its downstream (hub-side) hop (Apple M2 Pro/Max laptop right ACIO route only; read via debugfs port counters); default: false");
+		 "diagnostic: count packets on the DP video path's DP IN hop and its downstream (hub-side) hop (any DP IN; read via debugfs port counters); default: false");
 
 static void tb_dp_dump_apple(struct tb_tunnel *tunnel);
 static int tb_apple_nhi_typec_index(struct tb_nhi *nhi);
@@ -2031,7 +2031,8 @@ static bool tb_dp_video_counter_wanted(const struct tb_path *path)
 	if (!dp_video_counter || !path->path_length)
 		return false;
 
-	return tb_dp_is_apple_t602x_right_dpin(path->hops[0].in_port);
+	/* TRIAL: any DP IN (T6040 included), it is a diagnostic only */
+	return tb_port_is_dpin(path->hops[0].in_port);
 }
 
 static int tb_dp_init_video_path(struct tb_path *path, bool pm_support)
