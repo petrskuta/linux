@@ -1294,8 +1294,17 @@ static int dptxport_compact_call(struct apple_epic_service *service, u16 group,
 	if (group)
 		dev_dbg(service->ep->dcp->dev, "DPTX callback group %u command %u size %zu reply %zu\n",
 			group, command, size, room);
-	if (group == 1)
-		return dptxport_compact_group1(command, data, size, reply, room);
+	if (group == 1) {
+		int ret;
+
+		/* TRIAL: what does the firmware ask for (tunnel only)? */
+		print_hex_dump_debug("DPTX group1 req: ", DUMP_PREFIX_OFFSET, 16, 4,
+				     data, size, false);
+		ret = dptxport_compact_group1(command, data, size, reply, room);
+		print_hex_dump_debug("DPTX group1 rep: ", DUMP_PREFIX_OFFSET, 16, 4,
+				     reply, room, false);
+		return ret;
+	}
 	if (group)
 		return -EOPNOTSUPP;
 	return dptxport_call(service, command, data, size, reply, room);
