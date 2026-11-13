@@ -1989,6 +1989,153 @@ int apple_t6040_dp_tunnel_clock(struct phy *phy, unsigned int dpin, u8 rate)
 }
 EXPORT_SYMBOL_GPL(apple_t6040_dp_tunnel_clock);
 
+/*
+ * Trial: the T8132 DP tunnel pixel clock sequence (atc_t8122_tunnel_start())
+ * on the T6040 AUSPLL, which sits 0x1000 above T8132's: the DP alt mode
+ * link sequences program the same AUSPLL words (FREQ_DESC_A 0x1e0e021c,
+ * FREQ_CFG[1:0], BGR) at core +0x3000/+0x3200. The PLL values per rate are
+ * those DP alt mode uses on this PHY. No lane or lane crossbar register is
+ * written. A step that is not acknowledged stops the PLL and restores every
+ * register written.
+ */
+#define T6040_AUSPLL_APB_CMD		0x3000
+#define T6040_AUSPLL_APB_PRESERVE	0xe0000006U
+#define T6040_AUSPLL_FREQ_DESC_A	0x3080
+#define T6040_AUSPLL_FREQ_DESC_B	0x3084
+#define T6040_AUSPLL_FREQ_DESC_C	0x3088
+#define T6040_AUSPLL_CLKOUT_MASTER	0x3200
+#define T6040_AUSPLL_CLKOUT_DIV		0x3208
+#define T6040_AUSPLL_BGR		0x3218
+#define T6040_AUSPLL_FREQ_CFG		0x3234
+#define T6040_DP_TX_CTRL0		0x7000
+#define T6040_DP_PCLK_STATUS		0x7034
+#define T6040_DP_AUSPLL_LOCK		BIT(3)
+
+static const struct {
+	u8 rate;
+	u32 a, b, c;
+} t6040_tunnel_pll[] = {
+	{ 0x06, 0x1e0e021c, 0x0000000, 0x156600 },	/* RBR */
+	{ 0x0a, 0x1e0e01c2, 0x7fffffe, 0x155200 },	/* HBR */
+	{ 0x14, 0x1e0e01c2, 0x7fffffe, 0x554800 },	/* HBR2 */
+	{ 0x1e, 0x1e0e02a3, 0xbff7ffc, 0x564800 },	/* HBR3 */
+};
+
+static const u32 t6040_tunnel_pll_regs[] = {
+	T6040_AUSPLL_FREQ_DESC_A, T6040_AUSPLL_FREQ_DESC_B, T6040_AUSPLL_FREQ_DESC_C,
+	T6040_AUSPLL_CLKOUT_MASTER, T6040_AUSPLL_CLKOUT_DIV, T6040_AUSPLL_BGR,
+	T6040_AUSPLL_FREQ_CFG, T6040_DP_TX_CTRL0,
+};
+
+static int t6040_tunnel_apb(void __iomem *core, u32 command, bool ack)
+{
+	u32 v;
+
+	t6040_usb2_mask32(core + T6040_AUSPLL_APB_CMD, ~T6040_AUSPLL_APB_PRESERVE, command);
+	return readl_poll_timeout(core + T6040_AUSPLL_APB_CMD, v,
+				  !!(v & BIT(1)) == ack, 1, 10000);
+}
+
+static void t6040_tunnel_pll_dump(struct t6040_usb2_phy *tphy, const char *what)
+{
+	void __iomem *core = t6040_core(tphy), *cfg = t6040_cfg(tphy);
+
+	dev_info(tphy->dev,
+		 "tunnel pll %s: apb %#x A %#x B %#x C %#x clkout %#x div %#x bgr %#x fcfg %#x tx %#x pclk %#x sw %#x/%#x\n",
+		 what, readl(core + T6040_AUSPLL_APB_CMD),
+		 readl(core + T6040_AUSPLL_FREQ_DESC_A), readl(core + T6040_AUSPLL_FREQ_DESC_B),
+		 readl(core + T6040_AUSPLL_FREQ_DESC_C), readl(core + T6040_AUSPLL_CLKOUT_MASTER),
+		 readl(core + T6040_AUSPLL_CLKOUT_DIV), readl(core + T6040_AUSPLL_BGR),
+		 readl(core + T6040_AUSPLL_FREQ_CFG), readl(core + T6040_DP_TX_CTRL0),
+		 readl(core + T6040_DP_PCLK_STATUS),
+		 readl(cfg + T6040_CFG_DP_CLKSWITCH_CTRL), readl(cfg + T6040_CFG_DP_CLKSWITCH_STAT));
+}
+
+int apple_t6040_dp_tunnel_pll(struct phy *phy, unsigned int dpin, u8 rate)
+{
+	struct t6040_usb2_phy *tphy;
+	void __iomem *core;
+	u32 saved[ARRAY_SIZE(t6040_tunnel_pll_regs)], v;
+	int i, idx = -1, ret, err;
+
+	if (!phy || phy->ops != &t6040_dp_phy_ops)
+		return -EOPNOTSUPP;
+	if (dpin > 1)
+		return -EINVAL;
+	tphy = phy_get_drvdata(phy);
+	guard(mutex)(&tphy->lock);
+	core = t6040_core(tphy);
+	t6040_tunnel_pll_dump(tphy, rate ? "before" : "stop requested");
+	if (!rate || tphy->tunnel_clk_on)
+		return 0;
+	if (!tphy->cio_up)
+		return -ENOLINK;
+	for (i = 0; i < ARRAY_SIZE(t6040_tunnel_pll); i++)
+		if (t6040_tunnel_pll[i].rate == rate)
+			idx = i;
+	if (idx < 0)
+		return -EINVAL;
+	/* Somebody else's PLL: locked, a command pending, or its pixel clock driven. */
+	if ((readl(core + T6040_DP_PCLK_STATUS) & T6040_DP_AUSPLL_LOCK) ||
+	    (readl(core + T6040_AUSPLL_APB_CMD) & (BIT(0) | BIT(1))) ||
+	    (readl(core + T6040_AUSPLL_CLKOUT_MASTER) & BIT(3))) {
+		dev_warn(tphy->dev, "tunnel pll: AUSPLL busy, not touched\n");
+		return -EBUSY;
+	}
+	for (i = 0; i < ARRAY_SIZE(t6040_tunnel_pll_regs); i++)
+		saved[i] = readl(core + t6040_tunnel_pll_regs[i]);
+
+	t6040_usb2_clear32(core + T6040_AUSPLL_FREQ_CFG, 0x3);
+	writel(t6040_tunnel_pll[idx].a, core + T6040_AUSPLL_FREQ_DESC_A);
+	t6040_usb2_mask32(core + T6040_AUSPLL_FREQ_DESC_B, 0xfffffff, t6040_tunnel_pll[idx].b);
+	t6040_usb2_mask32(core + T6040_AUSPLL_FREQ_DESC_C, 0x7fffff, t6040_tunnel_pll[idx].c);
+	t6040_usb2_mask32(core + T6040_AUSPLL_CLKOUT_DIV, 0x1f0000, 0x70000);
+	t6040_usb2_set32(core + T6040_AUSPLL_BGR, BIT(0));
+	t6040_usb2_set32(core + T6040_AUSPLL_CLKOUT_MASTER, 0xaaa);
+	t6040_tunnel_pll_dump(tphy, "programmed");
+
+	ret = t6040_tunnel_apb(core, 0x10000001, true);
+	if (ret) {
+		dev_err(tphy->dev, "tunnel pll: no APB acknowledgement: %d\n", ret);
+		goto undo;
+	}
+	ret = readl_poll_timeout(core + T6040_DP_PCLK_STATUS, v,
+				 v & T6040_DP_AUSPLL_LOCK, 1, 10000);
+	if (ret) {
+		dev_err(tphy->dev, "tunnel pll: no lock (pclk status %#x)\n", v);
+		goto undo;
+	}
+	ret = t6040_tunnel_apb(core, 0x10010000, false);
+	if (ret) {
+		dev_err(tphy->dev, "tunnel pll: APB release not acknowledged: %d\n", ret);
+		goto undo;
+	}
+	t6040_tunnel_pll_dump(tphy, "locked");
+
+	/* Pixel clock selects as in DP alt mode, lane reset released. */
+	t6040_usb2_set32(core + T6040_DP_TX_CTRL0, 0xc);
+	t6040_usb2_mask32(core + T6040_DP_TX_CTRL0, 0x40fff0, 0x1110);
+	t6040_usb2_clear32(core + T6040_DP_TX_CTRL0, 0x1);
+	ret = t6040_dp_configure_clks(tphy);
+	t6040_tunnel_pll_dump(tphy, ret ? "switches failed" : "switches on");
+	if (ret)
+		goto undo;
+	tphy->tunnel_clk_on = true;
+	return 0;
+
+undo:
+	/* As atc_t8122_tunnel_stop(): request, release, wait for unlock, driver off. */
+	err = t6040_tunnel_apb(core, 0x10000001, true);
+	err = t6040_tunnel_apb(core, 0x10000018, false) ?: err;
+	err = readl_poll_timeout(core + T6040_DP_PCLK_STATUS, v,
+				 !(v & T6040_DP_AUSPLL_LOCK), 1, 10000) ?: err;
+	for (i = ARRAY_SIZE(t6040_tunnel_pll_regs) - 1; i >= 0; i--)
+		writel(saved[i], core + t6040_tunnel_pll_regs[i]);
+	t6040_tunnel_pll_dump(tphy, err ? "restored, PLL stop incomplete" : "restored");
+	return ret;
+}
+EXPORT_SYMBOL_GPL(apple_t6040_dp_tunnel_pll);
+
 /* ---- Type-C mode switch: the Type-C controller asks for DP on a USB-C port ---- */
 
 static int t6040_dp_mux_set(struct typec_mux_dev *mux, struct typec_mux_state *state)
