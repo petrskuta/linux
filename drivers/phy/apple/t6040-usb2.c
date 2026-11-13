@@ -2021,6 +2021,45 @@ static const struct {
 	{ 0x1e, 0x1e0e02a3, 0xbff7ffc, 0x564800 },	/* HBR3 */
 };
 
+/* Trial: 0 = the DP alt mode words per rate, 1 = T8132's tunnel words (one PLL, selector per rate). */
+static int tunnel_pll_profile;
+module_param(tunnel_pll_profile, int, 0644);
+MODULE_PARM_DESC(tunnel_pll_profile,
+		 "T6040 DP tunnel AUSPLL words (trial): 0 DP alt mode per rate, 1 T8132 tunnel");
+
+/* atc_t8122_tunnel_start(): FREQ_DESC_A/B/C, CLKOUT_DIV[20:16], PCLK selector by rate. */
+static u32 t6040_t8132_selector(u8 rate)
+{
+	switch (rate) {
+	case 0x06: return 4;
+	case 0x0a: return 3;
+	case 0x14: return 1;
+	default: return 0;	/* 0x1e */
+	}
+}
+
+/* Trial: log the PLL lock and the switches for a while after a start. */
+static struct t6040_usb2_phy *tunnel_watch_phy;
+static unsigned int tunnel_watch_left;
+static void t6040_tunnel_pll_dump(struct t6040_usb2_phy *tphy, const char *what);
+static void t6040_tunnel_watch_fn(struct work_struct *work);
+static DECLARE_DELAYED_WORK(tunnel_watch, t6040_tunnel_watch_fn);
+
+static void t6040_tunnel_watch_fn(struct work_struct *work)
+{
+	struct t6040_usb2_phy *tphy = READ_ONCE(tunnel_watch_phy);
+
+	if (!tphy)
+		return;
+	scoped_guard(mutex, &tphy->lock) {
+		if (!tphy->cio_up || !tphy->tunnel_clk_on)
+			return;
+		t6040_tunnel_pll_dump(tphy, "watch");
+	}
+	if (--tunnel_watch_left)
+		schedule_delayed_work(&tunnel_watch, msecs_to_jiffies(750));
+}
+
 static const u32 t6040_tunnel_pll_regs[] = {
 	T6040_AUSPLL_FREQ_DESC_A, T6040_AUSPLL_FREQ_DESC_B, T6040_AUSPLL_FREQ_DESC_C,
 	T6040_AUSPLL_CLKOUT_MASTER, T6040_AUSPLL_CLKOUT_DIV, T6040_AUSPLL_BGR,
@@ -2086,10 +2125,17 @@ int apple_t6040_dp_tunnel_pll(struct phy *phy, unsigned int dpin, u8 rate)
 		saved[i] = readl(core + t6040_tunnel_pll_regs[i]);
 
 	t6040_usb2_clear32(core + T6040_AUSPLL_FREQ_CFG, 0x3);
-	writel(t6040_tunnel_pll[idx].a, core + T6040_AUSPLL_FREQ_DESC_A);
-	t6040_usb2_mask32(core + T6040_AUSPLL_FREQ_DESC_B, 0xfffffff, t6040_tunnel_pll[idx].b);
-	t6040_usb2_mask32(core + T6040_AUSPLL_FREQ_DESC_C, 0x7fffff, t6040_tunnel_pll[idx].c);
-	t6040_usb2_mask32(core + T6040_AUSPLL_CLKOUT_DIV, 0x1f0000, 0x70000);
+	if (READ_ONCE(tunnel_pll_profile) == 1) {
+		writel(0x1e0e021c, core + T6040_AUSPLL_FREQ_DESC_A);
+		t6040_usb2_clear32(core + T6040_AUSPLL_FREQ_DESC_B, 0xfffffff);
+		t6040_usb2_mask32(core + T6040_AUSPLL_FREQ_DESC_C, 0x7fffff, 0x644a00);
+		t6040_usb2_mask32(core + T6040_AUSPLL_CLKOUT_DIV, 0x1f0000, 0x10000);
+	} else {
+		writel(t6040_tunnel_pll[idx].a, core + T6040_AUSPLL_FREQ_DESC_A);
+		t6040_usb2_mask32(core + T6040_AUSPLL_FREQ_DESC_B, 0xfffffff, t6040_tunnel_pll[idx].b);
+		t6040_usb2_mask32(core + T6040_AUSPLL_FREQ_DESC_C, 0x7fffff, t6040_tunnel_pll[idx].c);
+		t6040_usb2_mask32(core + T6040_AUSPLL_CLKOUT_DIV, 0x1f0000, 0x70000);
+	}
 	t6040_usb2_set32(core + T6040_AUSPLL_BGR, BIT(0));
 	t6040_usb2_set32(core + T6040_AUSPLL_CLKOUT_MASTER, 0xaaa);
 	t6040_tunnel_pll_dump(tphy, "programmed");
@@ -2114,13 +2160,25 @@ int apple_t6040_dp_tunnel_pll(struct phy *phy, unsigned int dpin, u8 rate)
 
 	/* Pixel clock selects as in DP alt mode, lane reset released. */
 	t6040_usb2_set32(core + T6040_DP_TX_CTRL0, 0xc);
-	t6040_usb2_mask32(core + T6040_DP_TX_CTRL0, 0x40fff0, 0x1110);
+	if (READ_ONCE(tunnel_pll_profile) == 1) {
+		u32 sel = t6040_t8132_selector(rate);
+
+		t6040_usb2_mask32(core + T6040_DP_TX_CTRL0, 0x40fff0,
+				  (sel << 4) | (sel << 8) | (sel << 12));
+	} else {
+		t6040_usb2_mask32(core + T6040_DP_TX_CTRL0, 0x40fff0, 0x1110);
+	}
 	t6040_usb2_clear32(core + T6040_DP_TX_CTRL0, 0x1);
 	ret = t6040_dp_configure_clks(tphy);
 	t6040_tunnel_pll_dump(tphy, ret ? "switches failed" : "switches on");
 	if (ret)
 		goto undo;
 	tphy->tunnel_clk_on = true;
+	dev_info(tphy->dev, "tunnel pll: profile %d, rate 0x%x\n",
+		 READ_ONCE(tunnel_pll_profile), rate);
+	WRITE_ONCE(tunnel_watch_phy, tphy);
+	tunnel_watch_left = 4;
+	schedule_delayed_work(&tunnel_watch, msecs_to_jiffies(750));
 	return 0;
 
 undo:
