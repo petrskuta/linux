@@ -490,14 +490,29 @@ struct apple_dpin_binding {
  * dpin0, and on routers with four, dpin2 and dpin3 0x18000 and 0x20000 after.
  */
 /* Trial: T6040/T6041 host router TMU left to the router firmware (QUIRK_HOST_TMU). */
-static bool t6040_host_tmu = true;
+static bool t6040_host_tmu;
 module_param(t6040_host_tmu, bool, 0444);
-MODULE_PARM_DESC(t6040_host_tmu, "T6040/T6041: leave the host router's TMU to its firmware (trial, default on)");
+MODULE_PARM_DESC(t6040_host_tmu, "T6040/T6041: leave the host router's TMU to its firmware (trial, default off: the T6040 firmware leaves it off)");
 
-/* Trial: the DP IN policy of T6040/T6041, 4 = apple_dpin_m4, 5 = apple_dpin_m5. */
-static int t6040_dpin = 5;
+/*
+ * Trial: the DP IN policy of T6040/T6041. 4 = apple_dpin_m4, 5 = apple_dpin_m5,
+ * 6 = apple_dpin_m4 with the T602X DP IN handshake (CONNECTED bits and
+ * MODE_A/MODE_B, see apple_dpin_handshake()): the ADT names the T6040 DP IN
+ * blocks "atc-dpin,t602x", and the t8103 handshake left +0x00 bit 1, +0x0c
+ * bit 1 and MODE_A/MODE_B clear while a tunnel streamed to a dark display.
+ */
+static int t6040_dpin = 6;
 module_param(t6040_dpin, int, 0444);
-MODULE_PARM_DESC(t6040_dpin, "T6040/T6041 DP IN policy (trial): 4 = M4 (T8132), 5 = M5 (T6050)");
+MODULE_PARM_DESC(t6040_dpin, "T6040/T6041 DP IN policy (trial): 4 = M4 (T8132), 5 = M5 (T6050), 6 = M4 with the T602X handshake");
+
+static const struct apple_dpin_policy apple_dpin_t6040_t602x = {
+	.flow = APPLE_DPIN_CHANGED,
+	.capacity_retry = true,
+	.defer_new_bringup = true,
+	.host_policy = TB_HOST_DP_NOTIFY | TB_HOST_DP_SHARED_RATE,
+	.lazy_idle = true,
+	.t602x_handshake = true,
+};
 
 #define APPLE_DPIN_OFFSET		0x390000
 #define APPLE_DPIN_SIZE			0x4000
@@ -4043,10 +4058,11 @@ static int apple_cio_probe(struct platform_device *pdev)
 	 * Trial: T6040/T6041 with the T6050 DP IN policy, which acknowledges a
 	 * DP IN block's pending events and enables them once a tunnel uses it.
 	 */
-	if (acio->dp == &apple_dpin_m4 && t6040_dpin == 5 &&
+	if (acio->dp == &apple_dpin_m4 && (t6040_dpin == 5 || t6040_dpin == 6) &&
 	    (of_machine_is_compatible("apple,t6040") || of_machine_is_compatible("apple,t6041"))) {
-		acio->dp = &apple_dpin_m5;
-		dev_info(dev, "trial: T6040 DP IN policy m5\n");
+		acio->dp = t6040_dpin == 5 ? &apple_dpin_m5 : &apple_dpin_t6040_t602x;
+		dev_info(dev, "trial: T6040 DP IN policy %s\n",
+			 t6040_dpin == 5 ? "m5" : "m4 with the T602X handshake");
 	}
 	if (acio->connector_np) {
 		ret = devm_add_action_or_reset(dev, apple_cio_of_node_put,
