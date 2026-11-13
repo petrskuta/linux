@@ -39,6 +39,12 @@ MODULE_PARM_DESC(tiled_split,
 		 "Drive both halves of a tiled Thunderbolt display (LG UltraFine 5K) on one pipeline, through its two DPTX ports (default: on)");
 
 /* Trial: what a T6040 tunnel pixel clock request does (no PHY support yet). */
+/* TRIAL: T6040 (T602X crossbar) DP IN across a link retrain */
+static int t6040_retrain;
+module_param(t6040_retrain, int, 0644);
+MODULE_PARM_DESC(t6040_retrain,
+		 "TRIAL: T602X DP IN on WillChangeLinkConfiguration: 0 inactive until link-up (default), 1 stays active, 2 active again at once (T6050 way)");
+
 static int t6040_tunnel_clock;
 module_param(t6040_tunnel_clock, int, 0644);
 MODULE_PARM_DESC(t6040_tunnel_clock,
@@ -2472,14 +2478,18 @@ int dcp_tunnel_crossbar_down(struct apple_dcp *dcp, u32 unit)
 		return -ESTALE;
 	if (dcp_is_t8132_ext(dcp))
 		return dcp_t8132_crossbar_down_locked(dcp, route, "WillChangeLinkConfiguration");
-	dcp_tunnel_dpin_locked(dcp, false);
+	if (!(t6040_retrain == 1 && dcp_t602x_tunnel_route(route)))
+		dcp_tunnel_dpin_locked(dcp, false);
 	ret = dcp_dpxbar_link(route->active_xbar, false);
 	/*
 	 * T8142 layout (T6050): the DP IN goes active again at once, so its
 	 * AUX path is there while DCP trains the new link configuration.
 	 */
-	if (dcp_xbar_t8142(route->active_xbar))
+	if (dcp_xbar_t8142(route->active_xbar) ||
+	    (t6040_retrain == 2 && dcp_t602x_tunnel_route(route)))
 		dcp_tunnel_dpin_locked(dcp, true);
+	dev_dbg(dcp->dev, "t6040 trial: retrain mode %d, crossbar link down %d\n",
+		t6040_retrain, ret);
 	return ret;
 }
 
