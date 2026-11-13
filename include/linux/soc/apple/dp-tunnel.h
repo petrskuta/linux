@@ -117,6 +117,8 @@ int apple_t6050_dp_tunnel_clock(struct phy *phy, unsigned int clock, u8 rate);
 int apple_t6040_dp_tunnel_clock(struct phy *phy, unsigned int dpin, u8 rate);
 /* Trial: T6040 AUSPLL as the DP tunnel pixel clock, then the clock switches. */
 int apple_t6040_dp_tunnel_pll(struct phy *phy, unsigned int dpin, u8 rate);
+/* Trial: T6040 DP tunnel pixel clock as in fbalazsy/linux ce42ee9d068829. */
+int apple_t6040_dp_tunnel_fb(struct phy *phy, unsigned int dpin, u8 rate);
 
 /*
  * ATC PHY: wake the DP clock path of a PHY in Thunderbolt/USB4 mode ahead of

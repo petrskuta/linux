@@ -42,7 +42,7 @@ MODULE_PARM_DESC(tiled_split,
 static int t6040_tunnel_clock;
 module_param(t6040_tunnel_clock, int, 0644);
 MODULE_PARM_DESC(t6040_tunnel_clock,
-		 "T6040 DP tunnel pixel clock (trial): 0 refuse it (default), 1 report it set without touching the PHY, 2 run the PHY's DP clock switches, 3 start the AUSPLL as on T8132 and run the switches");
+		 "T6040 DP tunnel pixel clock (trial): 0 refuse it (default), 1 report it set without touching the PHY, 2 run the PHY's DP clock switches, 3 start the AUSPLL as on T8132 and run the switches, 4 the J616s tree sequence (fbalazsy)");
 
 static bool typec_follow_crtc = true;
 module_param(typec_follow_crtc, bool, 0444);
@@ -414,6 +414,20 @@ static int dcp_route_clock_rate(struct apple_dcp_typec_route *route,
 	    of_machine_is_compatible("apple,t6041")) {
 		int mode = READ_ONCE(t6040_tunnel_clock);
 
+		if (mode == 4) {
+			typeof(apple_t6040_dp_tunnel_fb) *fn =
+				symbol_get(apple_t6040_dp_tunnel_fb);
+
+			ret = fn ? fn(phy, dpin, rate) : -ENOENT;
+			if (fn)
+				symbol_put(apple_t6040_dp_tunnel_fb);
+			dev_warn(route->dcp->dev,
+				 "t6040 trial: tunnel pixel clock dpin%u source %u rate 0x%x: fbalazsy sequence %d\n",
+				 dpin, route->mux_index, rate, ret);
+			if (!ret)
+				route->tunnel_rate = rate;
+			return ret;
+		}
 		if (mode == 3) {
 			typeof(apple_t6040_dp_tunnel_pll) *fn =
 				symbol_get(apple_t6040_dp_tunnel_pll);
