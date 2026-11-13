@@ -43,7 +43,7 @@ MODULE_PARM_DESC(tiled_split,
 static int t6040_retrain;
 module_param(t6040_retrain, int, 0644);
 MODULE_PARM_DESC(t6040_retrain,
-		 "TRIAL: T602X DP IN on WillChangeLinkConfiguration: 0 inactive until link-up (default), 1 stays active, 2 active again at once (T6050 way), 3 DP IN and crossbar link both left up");
+		 "TRIAL: T602X DP IN on WillChangeLinkConfiguration: 0 inactive until link-up (default), 1 stays active, 2 active again at once (T6050 way), 3 DP IN and crossbar link both left up, 4 as 3 and the pixel clock left running at the same rate");
 
 static int t6040_tunnel_clock;
 module_param(t6040_tunnel_clock, int, 0644);
@@ -420,6 +420,13 @@ static int dcp_route_clock_rate(struct apple_dcp_typec_route *route,
 	    of_machine_is_compatible("apple,t6041")) {
 		int mode = READ_ONCE(t6040_tunnel_clock);
 
+		/* TRIAL: t6040_retrain=4: same rate again, leave the clock running */
+		if (READ_ONCE(t6040_retrain) == 4 && rate && rate == route->tunnel_rate) {
+			dev_warn(route->dcp->dev,
+				 "t6040 trial: tunnel pixel clock dpin%u rate 0x%x already running: left alone\n",
+				 dpin, rate);
+			return 0;
+		}
 		if (mode == 4) {
 			typeof(apple_t6040_dp_tunnel_fb) *fn =
 				symbol_get(apple_t6040_dp_tunnel_fb);
@@ -2490,7 +2497,7 @@ int dcp_tunnel_crossbar_down(struct apple_dcp *dcp, u32 unit)
 		return -ESTALE;
 	if (dcp_is_t8132_ext(dcp))
 		return dcp_t8132_crossbar_down_locked(dcp, route, "WillChangeLinkConfiguration");
-	if (t6040_retrain == 3 && dcp_t602x_xbar_tunnel(route)) {
+	if ((t6040_retrain == 3 || t6040_retrain == 4) && dcp_t602x_xbar_tunnel(route)) {
 		dev_dbg(dcp->dev, "t6040 trial: retrain mode 3: DP IN and crossbar link left up\n");
 		return 0;
 	}
