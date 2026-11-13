@@ -489,6 +489,11 @@ struct apple_dpin_binding {
  * The blocks sit 0x390000 after the ACIO "rc" region: dpin1 0x8000 after
  * dpin0, and on routers with four, dpin2 and dpin3 0x18000 and 0x20000 after.
  */
+/* Trial: the DP IN policy of T6040/T6041, 4 = apple_dpin_m4, 5 = apple_dpin_m5. */
+static int t6040_dpin = 5;
+module_param(t6040_dpin, int, 0444);
+MODULE_PARM_DESC(t6040_dpin, "T6040/T6041 DP IN policy (trial): 4 = M4 (T8132), 5 = M5 (T6050)");
+
 #define APPLE_DPIN_OFFSET		0x390000
 #define APPLE_DPIN_SIZE			0x4000
 
@@ -4024,6 +4029,15 @@ static int apple_cio_probe(struct platform_device *pdev)
 	acio->dp_dual_stream = apple_dp_tunnel_dual_stream(acio->connector_np);
 	/* Register layout, root qualification and connector wiring are separate. */
 	acio->dp = apple_dpin_policy_select(acio->hw->dp, of_root, acio->dp_dual_stream);
+	/*
+	 * Trial: T6040/T6041 with the T6050 DP IN policy, which acknowledges a
+	 * DP IN block's pending events and enables them once a tunnel uses it.
+	 */
+	if (acio->dp == &apple_dpin_m4 && t6040_dpin == 5 &&
+	    (of_machine_is_compatible("apple,t6040") || of_machine_is_compatible("apple,t6041"))) {
+		acio->dp = &apple_dpin_m5;
+		dev_info(dev, "trial: T6040 DP IN policy m5\n");
+	}
 	if (acio->connector_np) {
 		ret = devm_add_action_or_reset(dev, apple_cio_of_node_put,
 					       acio->connector_np);
