@@ -243,10 +243,10 @@ static const struct apple_cio_hw apple_cio_t6040_hw = {
 	.strict_fw_ready = true,
 	.no_host_clx = true,
 	/*
-	 * Trial: the t8103 DP IN handshake as on M3, as in fbalazsy/linux
-	 * ce42ee9d068829 (it was apple_dpin_m4, the T8132 policy).
+	 * Trial: the T8132 policy. apple_dpin_m3 (as in fbalazsy/linux
+	 * ce42ee9d068829) made appledrm refuse the attach here (-EOPNOTSUPP).
 	 */
-	.dp = &apple_dpin_m3,
+	.dp = &apple_dpin_m4,
 };
 
 #define APPLE_CIO_NHI_HOP_COUNT 0x0
