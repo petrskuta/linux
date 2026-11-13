@@ -1982,6 +1982,18 @@ static void tb_dp_init_aux_path(struct tb_path *path, bool pm_support)
 	path->priority = TB_DP_AUX_PRIORITY;
 	path->weight = TB_DP_AUX_WEIGHT;
 
+	/* TRIAL: dp_video_counter also counts AUX packets (counter 1) where the
+	 * AUX TX path enters at the DP IN and the AUX RX path at the DP OUT.
+	 */
+	if (dp_video_counter && path->path_length &&
+	    (tb_port_is_dpin(path->hops[0].in_port) ||
+	     tb_port_is_dpout(path->hops[0].in_port))) {
+		path->hops[0].in_counter_index = 1;
+		tb_port_dbg(path->hops[0].in_port,
+			    "dp_video_counter: enabling counter 1 on %s AUX hop\n",
+			    tb_port_is_dpin(path->hops[0].in_port) ? "TX" : "RX");
+	}
+
 	tb_path_for_each_hop(path, hop) {
 		tb_dp_init_aux_credits(hop);
 		if (pm_support)
