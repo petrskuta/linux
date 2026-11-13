@@ -2467,14 +2467,34 @@ static int t6040_tun_rate_locked(struct t6040_usb2_phy *tphy, unsigned int dpin,
 }
 
 
+/*
+ * Trial: which pixel clock a DP IN adapter gets. fbalazsy: "The mapping of
+ * DP IN 0/1 to PCLK1/2 is inferred." 0 = as inferred (DP IN n -> PCLKn+1),
+ * 1 = swapped, 2 = both pixel clocks for either DP IN. Read at each call.
+ */
+static int tunnel_pclk_map;
+module_param(tunnel_pclk_map, int, 0644);
+MODULE_PARM_DESC(tunnel_pclk_map, "T6040 DP tunnel pixel clock mapping (trial): 0 inferred, 1 swapped, 2 both");
+
 int apple_t6040_dp_tunnel_fb(struct phy *phy, unsigned int dpin, u8 rate)
 {
 	struct t6040_usb2_phy *tphy;
+	int map = READ_ONCE(tunnel_pclk_map), ret, ret2;
 
 	if (!phy || phy->ops != &t6040_dp_phy_ops || dpin > 1)
 		return -EINVAL;
 	tphy = phy_get_drvdata(phy);
 	guard(mutex)(&tphy->lock);
+	if (map == 2) {
+		ret = t6040_tun_rate_locked(tphy, 0, rate);
+		ret2 = t6040_tun_rate_locked(tphy, 1, rate);
+		dev_info(tphy->dev, "tunnel pclk map 2: DP IN %u rate 0x%x -> PCLK1 %d, PCLK2 %d\n",
+			 dpin, rate, ret, ret2);
+		return ret ?: ret2;
+	}
+	if (map == 1)
+		dpin = !dpin;
+	dev_info(tphy->dev, "tunnel pclk map %d: rate 0x%x on PCLK%u\n", map, rate, dpin + 1);
 	return t6040_tun_rate_locked(tphy, dpin, rate);
 }
 EXPORT_SYMBOL_GPL(apple_t6040_dp_tunnel_fb);
