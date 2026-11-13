@@ -43,7 +43,7 @@ MODULE_PARM_DESC(tiled_split,
 static int t6040_retrain;
 module_param(t6040_retrain, int, 0644);
 MODULE_PARM_DESC(t6040_retrain,
-		 "TRIAL: T602X DP IN on WillChangeLinkConfiguration: 0 inactive until link-up (default), 1 stays active, 2 active again at once (T6050 way)");
+		 "TRIAL: T602X DP IN on WillChangeLinkConfiguration: 0 inactive until link-up (default), 1 stays active, 2 active again at once (T6050 way), 3 DP IN and crossbar link both left up");
 
 static int t6040_tunnel_clock;
 module_param(t6040_tunnel_clock, int, 0644);
@@ -2490,6 +2490,10 @@ int dcp_tunnel_crossbar_down(struct apple_dcp *dcp, u32 unit)
 		return -ESTALE;
 	if (dcp_is_t8132_ext(dcp))
 		return dcp_t8132_crossbar_down_locked(dcp, route, "WillChangeLinkConfiguration");
+	if (t6040_retrain == 3 && dcp_t602x_xbar_tunnel(route)) {
+		dev_dbg(dcp->dev, "t6040 trial: retrain mode 3: DP IN and crossbar link left up\n");
+		return 0;
+	}
 	if (!(t6040_retrain == 1 && dcp_t602x_xbar_tunnel(route)))
 		dcp_tunnel_dpin_locked(dcp, false);
 	ret = dcp_dpxbar_link(route->active_xbar, false);
