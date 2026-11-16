@@ -131,7 +131,7 @@
 };
 
 &usb4_0_acio {
-	/delete-property/ apple,pcie-tunnel;
+	/* TRIAL: keep apple,pcie-tunnel: the left port's PCIe-C below. */
 	status = "okay";
 };
 
@@ -142,6 +142,23 @@
 };
 
 &usb4_0_nhi {
+	status = "okay";
+};
+
+/*
+ * TRIAL: the left port's PCIe-C (tunneled PCIe), e.g. the Studio Display's
+ * xHCI. No boot loader hands it over: the kernel cold-initializes it.
+ */
+&usb4_0_pcie_tunnel {
+	status = "okay";
+};
+
+&apciec0_dart {
+	status = "okay";
+};
+
+&usb4_0_pcie {
+	apple,pciec-kernel-init;
 	status = "okay";
 };
 
