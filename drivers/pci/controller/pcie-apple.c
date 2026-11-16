@@ -405,6 +405,12 @@ static const struct hw_info t8132_pciec_hw = {
 	.s2idle_hold_domain	= true,
 };
 
+/*
+ * TRIAL: T6040 PCIe-C is an Intr2AXI controller like T6050: the ADT
+ * (apciec,t6040) has no oe-fabric region, and its fabric/rc/debug/config and
+ * DART tunables are T6050's with small value differences. Cold init therefore
+ * takes the T6050 path (no port reset sequence, RID2SID cleared only).
+ */
 static const struct hw_info t6040_pciec_hw = {
 	.port_msiaddr		= PORT_MSIADDR,
 	.port_msiaddr_hi	= PORT_MSIADDR + 4,
@@ -415,7 +421,8 @@ static const struct hw_info t6040_pciec_hw = {
 	.max_rid2sid		= 256,
 	.sid_indexed_rid2sid	= true,
 	.tunneled		= true,
-	.t8132_reset		= true,
+	.tunnel_intr2axi	= true,
+	.no_port_reset		= true,
 	.msimap_by_vector	= true,
 	.s2idle_hold_domain	= true,
 };
