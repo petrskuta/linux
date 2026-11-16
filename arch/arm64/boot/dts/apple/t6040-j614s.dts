@@ -160,6 +160,15 @@
 	 * 16 KiB a dead mapping: the tunnel's devices address DMA only there.
 	 */
 	apple,dma-range = <0x100 0x80004000 0x0 0x7fefc000>;
+	/*
+	 * As T6050's PCIe-C DART: the port's own writes (MSIs turned into AIC
+	 * writes) use reserved streams 253 and 255 (ADT bypass-253, bypass-255),
+	 * which must bypass; and report every error class.
+	 */
+	power-domains = <&ps_atc0_pcie>;
+	apple,bypass-sids = <253 255>;
+	apple,full-error-reporting;
+	apple,ctc-flush;
 	apple,tunable = <0x20c 0x80000121 0x80000121>,
 			<0x220 0xf0f0f 0xf0f0f>,
 			<0x224 0xffffff 0x80808>,
