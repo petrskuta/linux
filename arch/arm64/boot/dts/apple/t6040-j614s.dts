@@ -155,6 +155,11 @@
 
 /* Tunables: the j614s ADT (macOS 26 IODeviceTree) dart-apciec0 and apciec0. */
 &apciec0_dart {
+	/*
+	 * ADT dart-apciec0 vm-base 1 TiB + 2 GiB, vm-size 0x7ff00000, its first
+	 * 16 KiB a dead mapping: the tunnel's devices address DMA only there.
+	 */
+	apple,dma-range = <0x100 0x80004000 0x0 0x7fefc000>;
 	apple,tunable = <0x20c 0x80000121 0x80000121>,
 			<0x220 0xf0f0f 0xf0f0f>,
 			<0x224 0xffffff 0x80808>,
